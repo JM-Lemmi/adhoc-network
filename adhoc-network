@@ -1,0 +1,65 @@
+#! /bin/bash
+
+#dependencies: ipcalc, iproute2, isc-dhcp-server, radvd
+
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root"
+  exit 1
+fi
+
+tmpfolder=$(cat /dev/urandom | base64 | head -c 8)
+
+four_flag='true'
+six_flag='true'
+interface=''
+network='192.168.138.0/24'
+verbose='false'
+
+print_usage() {
+  printf "Usage: -i <interface> define the downstream interface"
+}
+
+while getopts '46i:r:v' flag; do
+  case "${flag}" in
+    4) six_flag='false' ;;
+    6) four_flag='false' ;;
+    i) interface="${OPTARG}" ;;
+    r) ip4space="${OPTARG}" ;;
+    v) verbose='true' ;;
+    *) print_usage
+       exit 1 ;;
+  esac
+done
+
+# check if interface is an existing interface
+if ! ip link show ${interface} >/dev/null; then
+    printf "Interface does not exist!"
+    exit 1
+fi
+
+
+
+if ${four_flag}; then
+  # füge lokale ipv4 addressen hinzu
+  echo "[#] ip addr add $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') dev ${interface}"
+  ip addr add $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') dev ${interface}
+
+  # starte dhcp service
+  echo -e "subnet $(ipcalc ${network} -b | awk -F"[ ',]+" '/Netmask:/{print $2}' | awk -F'/' '{print $1}') netmask $(ipcalc ${network} -b | awk -F"[ ',]+" '/Netmask:/{print $2}') {option routers $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}');\noption domain-name-servers $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}');\nrange $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMax:/{print $2}');\n}" > /tmp/${tmpfolder}/dhcpd.conf
+  echo "[*] Configuring DHCP with Range $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')-$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMax:/{print $2}')."
+  echo "[#] dhcpd -4 -cf /tmp/${tmpfolder}/dhcpd.conf"
+  dhcpd -4 -cf /tmp/${tmpfolder}/dhcpd.conf & dhcpd_pid=$!
+
+  # starte dns forwarder
+fi
+
+if ${six_flag}; then
+  # füge lokale ipv6 addressen hinzu
+
+  # starte radvd
+fi
+
+read
+
+# cleanup code
+kill "$dhcpd_pid"
