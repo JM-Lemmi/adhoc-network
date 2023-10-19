@@ -2,33 +2,55 @@
 
 #dependencies: ipcalc, iproute2, dnsmasq, radvd
 
+# EXIT FUNCTION
+function cleanup() {
+  echo
+  echo "[*] killing dnsmasq"
+  kill "$(cat /var/run/dnsmasq.pid)"
+  echo "[#] ip addr del $(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${ip4space} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}"
+  ip addr del $(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${ip4space} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}
+
+  exit 0
+}
+
+## START OF SCRIPT
+
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
   exit 1
 fi
 
+trap "cleanup" SIGINT SIGTERM
+
+# getting flags
+vars=$(getopt --options i:vh46 --longoptions interface:,range4:,range6: --name 'adhoc-network' -- "$@")
+if [ $? != 0 ] ; then exit 1 ; fi
+eval set -- ${vars}
+
 tmpfolder=$(head -c 8 /proc/sys/kernel/random/uuid)
 mkdir "/tmp/${tmpfolder}"
-
-four_flag='true'
-six_flag='true'
-interface=''
-network='192.168.138.0/24'
-verbose='false'
 
 print_usage() {
   printf "Usage: -i <interface> define the downstream interface"
 }
 
-while getopts '46i:r:v' flag; do
-  case "${flag}" in
-    4) six_flag='false' ;;
-    6) four_flag='false' ;;
-    i) interface="${OPTARG}" ;;
-    r) ip4space="${OPTARG}" ;;
-    v) verbose='true' ;;
-    *) print_usage
-       exit 1 ;;
+four_flag='true'
+six_flag='true'
+interface=''
+ip4space='192.168.138.0/24'
+ip6space=''
+verbose='false'
+
+while true; do
+  case "$1" in
+    -4) six_flag='false'; shift ;;
+    -6) four_flag='false'; shift ;;
+    -i | --interface) interface="$2"; shift 2 ;;
+    --range4) if four_flag==false; then echo "[!] --range4 set but ipv4 disabled!"; exit 1; fi; ip4space="$2"; shift 2 ;;
+    --range6) if six_flag==false; then echo "[!] --range6 set but ipv6 disabled!"; exit 1; fi; ip6space="$2"; shift 2 ;;
+    -v) verbose='true'; shift ;;
+    -h | --help) print_usage exit 0 ;;
+    * ) break ;;
   esac
 done
 
@@ -42,11 +64,11 @@ dnsmasqargs=''
 
 if ${four_flag}; then
   # füge lokale ipv4 addressen hinzu
-  echo "[#] ip addr add $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${network} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}"
-  ip addr add $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${network} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}
+  echo "[#] ip addr add $(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${ip4space} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}"
+  ip addr add $(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${ip4space} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}
 
   # configure dhcp
-  dnsmasqargs="${dnsmasqargs} --dhcp-range=$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}'),$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMax:/{print $2}'),24h --dhcp-option=option:router,$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') --dhcp-option=option:dns-server,$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') --dhcp-option=option:netmask,$(ipcalc ${network} -b | awk -F"[ ',]+" '/Netmask:/{print $2}')"
+  dnsmasqargs="${dnsmasqargs} --dhcp-range=$(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}'),$(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMax:/{print $2}'),24h --dhcp-option=option:router,$(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') --dhcp-option=option:dns-server,$(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') --dhcp-option=option:netmask,$(ipcalc ${ip4space} -b | awk -F"[ ',]+" '/Netmask:/{print $2}')"
 fi
 
 if ${six_flag}; then
@@ -66,7 +88,4 @@ dnsmasq ${dnsmasqargs}
 tail -f /tmp/${tmpfolder}/dhcp.log &
 read
 
-# cleanup code
-echo "[*] killing dnsmasq and deleting address"
-kill "$(cat /var/run/dnsmasq.pid)"
-ip addr del $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${network} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}
+cleanup
