@@ -7,7 +7,7 @@ if [ "$EUID" -ne 0 ]
   exit 1
 fi
 
-tmpfolder=$(cat /dev/urandom | base64 | head -c 8)
+tmpfolder=$(head -c 8 /proc/sys/kernel/random/uuid)
 mkdir "/tmp/${tmpfolder}"
 
 four_flag='true'
@@ -38,7 +38,7 @@ if ! ip link show ${interface} >/dev/null; then
     exit 1
 fi
 
-touch /tmp/${tmpfolder}/dnsmasq.conf
+dnsmasqargs=''
 
 if ${four_flag}; then
   # füge lokale ipv4 addressen hinzu
@@ -46,9 +46,7 @@ if ${four_flag}; then
   ip addr add $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${network} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}
 
   # configure dhcp
-  echo "[*] Configuring DNSmasq as DHCP."
-  echo -e "dhcp-range=$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}'),$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMax:/{print $2}'),24h\ndhcp-option=option:router,$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')\ndhcp-option=option:dns-server,$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')\ndhcp-option=option:netmask,$(ipcalc ${network} -b | awk -F"[ ',]+" '/Netmask:/{print $2}')" >> /tmp/${tmpfolder}/dnsmasq.conf
-  echo -e "listen-address=$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')" >> /tmp/${tmpfolder}/dnsmasq.conf
+  dnsmasqargs="${dnsmasqargs} --dhcp-range=$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}'),$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMax:/{print $2}'),24h --dhcp-option=option:router,$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') --dhcp-option=option:dns-server,$(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}') --dhcp-option=option:netmask,$(ipcalc ${network} -b | awk -F"[ ',]+" '/Netmask:/{print $2}')"
 fi
 
 if ${six_flag}; then
@@ -58,18 +56,17 @@ if ${six_flag}; then
 fi
 
 # start dns
-echo "[*] Configuring DNSmasq as DNS"
-echo -e "#! /bin/bash\n\necho [+] \$1 \$2 \$3 >> /tmp/${tmpfolder}/dhcp.log" > /tmp/${tmpfolder}/dhcp.sh
-chmod +x /tmp/${tmpfolder}/dhcp.sh
+echo -e "#! /bin/bash\n\necho [+] \$1 \$2 \$3 >> /tmp/${tmpfolder}/dhcp.log" > /tmp/${tmpfolder}/dhcp-log.sh
+chmod +x /tmp/${tmpfolder}/dhcp-log.sh
 touch /tmp/${tmpfolder}/dhcp.log
-echo -e "port=53\nlog-facility=/var/log/dnsmasq.log\ndhcp-script=/tmp/${tmpfolder}/dhcp.sh" >> /tmp/${tmpfolder}/dnsmasq.conf
-echo "[#] dnsmasq -C /tmp/${tmpfolder}/dnsmasq.conf"
-dnsmasq -C /tmp/${tmpfolder}/dnsmasq.conf
+dnsmasqargs="${dnsmasqargs} --port=53 --log-facility=/var/log/dnsmasq.log --dhcp-script=/tmp/${tmpfolder}/dhcp-log.sh --dhcp-leasefile=/tmp/${tmpfolder}/dhcp.leases"
+echo "[#] dnsmasq ${dnsmasqargs}"
+dnsmasq ${dnsmasqargs}
 
 tail -f /tmp/${tmpfolder}/dhcp.log &
 read
 
 # cleanup code
-echo "[*] killing ad deleting address"
+echo "[*] killing dnsmasq and deleting address"
 kill "$(cat /var/run/dnsmasq.pid)"
 ip addr del $(ipcalc ${network} -b | awk -F"[ ',]+" '/HostMin:/{print $2}')/$(ipcalc ${network} -b | awk -F'= ' '/Netmask:/{print $2}') dev ${interface}
