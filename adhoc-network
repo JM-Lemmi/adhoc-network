@@ -22,7 +22,8 @@ fi
 
 trap "cleanup" SIGINT SIGTERM
 
-# getting flags
+## getting options
+
 vars=$(getopt --options i:vh46 --longoptions interface:,range4:,range6: --name 'adhoc-network' -- "$@")
 if [ $? != 0 ] ; then exit 1 ; fi
 eval set -- ${vars}
@@ -54,11 +55,15 @@ while true; do
   esac
 done
 
+if [ -z "$interface" ]; then echo '[!] Missing -i or --interface'; exit 1; fi
+
 # check if interface is an existing interface
 if ! ip link show ${interface} >/dev/null; then
     printf "Interface does not exist!"
     exit 1
 fi
+
+## begin of configuration
 
 dnsmasqargs=''
 
