@@ -1,8 +1,8 @@
 #! /bin/bash
 
-#dependencies: ipcalc, iproute2, dnsmasq, radvd
+#dependencies: ipcalc, iproute2, dnsmasq
 
-# EXIT FUNCTION
+# FUNCTIONs
 function cleanup() {
   echo
   echo "[*] killing dnsmasq"
@@ -77,8 +77,20 @@ if ${four_flag}; then
 fi
 
 if ${six_flag}; then
+  if [ -z "${ip6range}"]; then
+    #genula()
+
+    # Convert from hex string representation to bytes before sha1sum
+    # https://unix.stackexchange.com/a/82766
+    eui64="$(cat /sys/class/net/${interface}/address | cut -c1-9)ff:fe$(cat /sys/class/net/${interface}/address | cut -c9-18)"
+    eui64="${eui64//:}"
+    globalid=$(echo -ne $(sed "s/../\\x&/g" <<< $(date)${eui64}) | sha1sum | cut -c18-32)
+    ip6range="fd$(echo ${globalid} | cut -c1-2):$(echo ${globalid} | cut -c3-6):$(echo ${globalid} | cut -c7-10):$(echo ${globalid} | cut -c11-14)::/64"
+    echo "[+] Generated ULA ${ip6range}"
+  fi
+
   # füge lokale ipv6 addressen hinzu
-  echo "[!] pass v6 config. not implemented yet"
+  echo "[!] Pass v6 config. not implemented yet"
   # starte radvd
 fi
 
